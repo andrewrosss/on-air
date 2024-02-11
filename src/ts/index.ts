@@ -24,7 +24,8 @@ class LogTailer {
   }
 
   async start() {
-    log("Starting log tailer");
+    const logger = ConsoleLogger.get();
+    logger.logInfo("Starting log tailer");
 
     // TODO: make this work for different mac versions
     // TODO: make this configurable
@@ -45,7 +46,7 @@ class LogTailer {
       for await (const chunk of this.#process.stdout) {
         const line = Buffer.from(chunk).toString("utf-8");
 
-        // TODO: if verbose mode, log all lines
+        logger.logDebug(line);
 
         // don't log the log filtering message
         if (line.includes("Filtering the log data using")) continue;
@@ -63,7 +64,7 @@ class LogTailer {
           this.#subscribers.forEach((sub) => sub(this.#state, "mic_off"));
           this.#state.mic = false;
         } else {
-          log("Unknown log line:", line);
+          logger.logInfo("Unknown log line:", line);
         }
       }
     } catch (err) {
@@ -102,7 +103,8 @@ class LightController implements ILightController {
 
 function logSubscriberFactory(light: ILightController): LogSubscriber {
   return async (state, event) => {
-    log(`State = ${JSON.stringify(state)}, Event = ${event}`);
+    const logger = ConsoleLogger.get();
+    logger.logInfo(`State = ${JSON.stringify(state)}, Event = ${event}`);
     if (event === "camera_on") await light.on();
     else if (event === "mic_on") await light.on();
     // only send off-air if both camera and mic are off
@@ -118,9 +120,32 @@ function nullthrows<T>(value: T | null | undefined, message?: string): T {
   throw new Error(message || "Got unexpected null or undefined value");
 }
 
-function log(...data: any[]) {
-  const date_str = new Date().toISOString();
-  console.log(`[${date_str}]`, ...data);
+// A chintzy singleton logger. Get the instance with `ConsoleLogger.get()`
+class ConsoleLogger {
+  private static instance: ConsoleLogger | null = null;
+  private constructor() {}
+
+  static get() {
+    if (!this.instance) this.instance = new ConsoleLogger();
+    return this.instance;
+  }
+
+  logInfo(...data: any[]) {
+    const date_str = new Date().toISOString();
+    console.log(`[${date_str}][INFO]`, ...data);
+  }
+
+  logError(...data: any[]) {
+    const date_str = new Date().toISOString();
+    console.error(`[${date_str}][ERROR]`, ...data);
+  }
+
+  logDebug(...data: any[]) {
+    if (!!Bun.env.VERBOSE || !!Bun.env.DEBUG) {
+      const date_str = new Date().toISOString();
+      console.log(`[${date_str}][DEBUG]`, ...data);
+    }
+  }
 }
 
 if (import.meta.main) {
@@ -130,8 +155,10 @@ if (import.meta.main) {
   tailer.subscribe(subscriber);
   tailer.start();
 
+  const logger = ConsoleLogger.get();
+
   const port = Bun.env.PORT ?? 4417;
-  log(`Starting server on port ${port}`);
+  logger.logInfo(`Starting server on port ${port}`);
 
   Bun.serve({
     port,
