@@ -93,10 +93,14 @@ class LightController implements ILightController {
   }
 
   async on() {
+    const logger = ConsoleLogger.get();
+    logger.logInfo("Turning light ON");
     await fetch(this.onURL, { method: "POST" });
   }
 
   async off() {
+    const logger = ConsoleLogger.get();
+    logger.logInfo("Turning light OFF");
     await fetch(this.offURL, { method: "POST" });
   }
 }
@@ -118,6 +122,17 @@ function nullthrows<T>(value: T | null | undefined, message?: string): T {
     return value;
   }
   throw new Error(message || "Got unexpected null or undefined value");
+}
+
+function debounce<F extends (...args: any[]) => any>(
+  func: F,
+  delay: number // in milliseconds
+): (...args: Parameters<F>) => void {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  return async function (this: any, ...args: Parameters<F>) {
+    timeout != null && clearTimeout(timeout);
+    timeout = setTimeout(async () => func.apply(this, args), delay);
+  };
 }
 
 // A chintzy singleton logger. Get the instance with `ConsoleLogger.get()`
@@ -151,8 +166,9 @@ class ConsoleLogger {
 if (import.meta.main) {
   const light = LightController.fromEnv();
   const subscriber = logSubscriberFactory(light);
+  const subscriberDebounced = debounce(subscriber, 500);
   const tailer = new LogTailer();
-  tailer.subscribe(subscriber);
+  tailer.subscribe(subscriberDebounced);
   tailer.start();
 
   const logger = ConsoleLogger.get();
