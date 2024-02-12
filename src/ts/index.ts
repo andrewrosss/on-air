@@ -1,11 +1,9 @@
 import type { Subprocess } from "bun";
 
 type LogEventType = "camera_on" | "camera_off" | "mic_on" | "mic_off";
-type LogState = { camera: boolean; mic: boolean };
-type LogSubscriber = (
-  state: LogState,
-  event: LogEventType
-) => void | Promise<void>;
+type LogEvent = { type: LogEventType; camera: boolean; mic: boolean };
+type LogState = Pick<LogEvent, "camera" | "mic">;
+type LogSubscriber = (event: LogEvent) => void | Promise<void>;
 
 class LogTailer {
   #subscribers: Array<LogSubscriber> = [];
@@ -52,16 +50,20 @@ class LogTailer {
         if (line.includes("Filtering the log data using")) continue;
 
         if (line.includes("ConnectClient")) {
-          this.#subscribers.forEach((sub) => sub(this.#state, "camera_on"));
+          const event = { type: "camera_on", ...this.#state } as const;
+          this.#subscribers.forEach((sub) => sub(event));
           this.#state.camera = true;
         } else if (line.includes("DisconnectClient")) {
-          this.#subscribers.forEach((sub) => sub(this.#state, "camera_off"));
+          const event = { type: "camera_off", ...this.#state } as const;
+          this.#subscribers.forEach((sub) => sub(event));
           this.#state.camera = false;
         } else if (line.includes("Starting {")) {
-          this.#subscribers.forEach((sub) => sub(this.#state, "mic_on"));
+          const event = { type: "mic_on", ...this.#state } as const;
+          this.#subscribers.forEach((sub) => sub(event));
           this.#state.mic = true;
         } else if (line.includes("Stopping {")) {
-          this.#subscribers.forEach((sub) => sub(this.#state, "mic_off"));
+          const event = { type: "mic_off", ...this.#state } as const;
+          this.#subscribers.forEach((sub) => sub(event));
           this.#state.mic = false;
         } else {
           logger.logInfo("Unknown log line:", line);
@@ -106,14 +108,15 @@ class LightController implements ILightController {
 }
 
 function logSubscriberFactory(light: ILightController): LogSubscriber {
-  return async (state, event) => {
+  return async (event) => {
+    const { type: _type, ...state } = event;
     const logger = ConsoleLogger.get();
-    logger.logInfo(`State = ${JSON.stringify(state)}, Event = ${event}`);
-    if (event === "camera_on") await light.on();
-    else if (event === "mic_on") await light.on();
+    logger.logInfo(`State = ${JSON.stringify(state)}, EventType = ${_type}`);
+    if (_type === "camera_on") await light.on();
+    else if (_type === "mic_on") await light.on();
     // only send off-air if both camera and mic are off
-    else if (event === "camera_off" && !state.mic) await light.off();
-    else if (event === "mic_off" && !state.camera) await light.off();
+    else if (_type === "camera_off" && !state.mic) await light.off();
+    else if (_type === "mic_off" && !state.camera) await light.off();
   };
 }
 
