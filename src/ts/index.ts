@@ -107,7 +107,27 @@ class LightController implements ILightController {
   }
 }
 
-function logSubscriberFactory(light: ILightController): LogSubscriber {
+type PubSubEvent = LogEvent; // TODO: Add UI-driven events
+type PubSubSubscriber = (e: PubSubEvent) => void | Promise<void>;
+
+class PubSub {
+  #subscribers: Array<PubSubSubscriber> = [];
+
+  subscribe(subscriber: (e: PubSubEvent) => void) {
+    this.#subscribers.push(subscriber);
+    return () => {
+      this.#subscribers = this.#subscribers.filter((sub) => sub !== subscriber);
+    };
+  }
+
+  publish(event: PubSubEvent) {
+    this.#subscribers.forEach((sub) => sub(event));
+  }
+}
+
+// --- Utility functions ---
+
+function subscriberFactory(light: ILightController): PubSubSubscriber {
   return async (event) => {
     const { type: _type, ...state } = event;
     const logger = ConsoleLogger.get();
@@ -166,12 +186,21 @@ class ConsoleLogger {
   }
 }
 
+// --- Main ---
+
 if (import.meta.main) {
+  // create our light controller and make a subscriber for pubsub events
   const light = LightController.fromEnv();
-  const subscriber = logSubscriberFactory(light);
+  const subscriber = subscriberFactory(light);
   const subscriberDebounced = debounce(subscriber, 500);
+
+  // create pubsub and wire up the light subscriber
+  const pubsub = new PubSub();
+  pubsub.subscribe(subscriberDebounced);
+
+  // create a log tailer and forward events to pubsub
   const tailer = new LogTailer();
-  tailer.subscribe(subscriberDebounced);
+  tailer.subscribe((event) => pubsub.publish(event));
   tailer.start();
 
   const logger = ConsoleLogger.get();
