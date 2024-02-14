@@ -42,7 +42,7 @@ class LogTailer {
         // camera
         '(process == "appleh13camerad" and (composedMessage contains "ConnectClient" or composedMessage contains "DisconnectClient"))',
         // mic
-        '(process == "coreaudiod" and subsystem == "com.apple.coreaudio" and (composedMessage contains "Starting {" or composedMessage contains "Stopping {"))',
+        '(process == "coreaudiod" and subsystem == "com.apple.coreaudio")',
       ].join(" or "),
     ]);
 
@@ -64,7 +64,7 @@ class LogTailer {
           const event = { type: "camera_off", ...this.#state } as const;
           this.#subscribers.forEach((sub) => sub(event));
           this.#state.camera = false;
-        } else if (line.includes("Starting {")) {
+        } else if ((line.match(/input_\w+/g)?.length ?? 0) > 5) {
           const event = { type: "mic_on", ...this.#state } as const;
           this.#subscribers.forEach((sub) => sub(event));
           this.#state.mic = true;
