@@ -135,12 +135,14 @@ class PubSub {
 
 // --- Utility functions ---
 
-function subscriberFactory(light: ILightController): PubSubSubscriber {
+/**
+ * handles events from the log tailer and toggles the light on and off
+ */
+function hardwareSubscriberFactory(light: ILightController): PubSubSubscriber {
   return async (event) => {
     const logger = ConsoleLogger.get();
 
     switch (event.type) {
-      // events from the log tailer
       case "camera_on":
       case "camera_off":
       case "mic_on":
@@ -154,19 +156,31 @@ function subscriberFactory(light: ILightController): PubSubSubscriber {
         else if (_type === "mic_off" && !state.camera) await light.off();
         return;
       }
-
-      // events from the frontend
-      case "on_air":
-      case "off_air": {
-        logger.logInfo(`EventType = ${event.type}`);
-        if (event.type === "on_air") await light.on();
-        else await light.off();
-        return;
-      }
-
-      default:
-        logger.logError("Unknown event type:", event);
     }
+  };
+}
+
+/**
+ * handles on_air events from the frontend and turns the light on
+ */
+function onAirSubscriberFactory(light: ILightController): PubSubSubscriber {
+  return async (event) => {
+    const logger = ConsoleLogger.get();
+    if (event.type !== "on_air") return;
+    logger.logInfo(`EventType = ${event.type}`);
+    await light.on();
+  };
+}
+
+/**
+ * handles off_air events from the frontend and turns the light off
+ */
+function offAirSubscriberFactory(light: ILightController): PubSubSubscriber {
+  return async (event) => {
+    const logger = ConsoleLogger.get();
+    if (event.type !== "off_air") return;
+    logger.logInfo(`EventType = ${event.type}`);
+    await light.off();
   };
 }
 
@@ -185,6 +199,20 @@ function debounce<F extends (...args: any[]) => any>(
   return async function (this: any, ...args: Parameters<F>) {
     timeout != null && clearTimeout(timeout);
     timeout = setTimeout(async () => func.apply(this, args), delay);
+  };
+}
+
+function throttle<F extends (...args: any[]) => any>(
+  func: F,
+  delay: number // in milliseconds
+): (...args: Parameters<F>) => void {
+  let t_prev: number = 0;
+  return async function (this: any, ...args: Parameters<F>) {
+    const now = Date.now();
+    if (now - t_prev >= delay) {
+      t_prev = now;
+      return func.apply(this, args);
+    }
   };
 }
 
@@ -219,14 +247,30 @@ class ConsoleLogger {
 // --- Main ---
 
 if (import.meta.main) {
-  // create our light controller and make a subscriber for pubsub events
+  // create our light controller and make subscribers for pubsub events
   const light = LightController.fromEnv();
-  const subscriber = subscriberFactory(light);
-  const subscriberDebounced = debounce(subscriber, 500);
+  const hardwareSubscriber = hardwareSubscriberFactory(light);
+  const onAirSubscriber = onAirSubscriberFactory(light);
+  const offAirSubscriber = offAirSubscriberFactory(light);
+
+  // NOTE: the hardwareSubscriber is debounced, and the onAirSubscriber and
+  //       offAirSubscriber are throttled. This is because the hardware
+  //       events can be very chatty and we don't want to spam the light
+  //       controller with requests. The on_air and off_air events are
+  //       throttled because we also don't want to spam the light controller
+  //       with requests, but we do want to register the first on_air and
+  //       off_air events from the frontend as quickly as possible.
+  //
+  //       We split the on_air and off_air events into separate subscribers
+  //       so that we can throttle them independently, this way even if
+  //       you're getting throttled for off_air events, you can still send
+  //       on_air events and they will be handled immediately (and vice versa)
 
   // create pubsub and wire up the light subscriber
   const pubsub = new PubSub();
-  pubsub.subscribe(subscriberDebounced);
+  pubsub.subscribe(debounce(hardwareSubscriber, 500));
+  pubsub.subscribe(throttle(onAirSubscriber, 500));
+  pubsub.subscribe(throttle(offAirSubscriber, 500));
 
   // create a log tailer and forward events to pubsub
   const tailer = new LogTailer();
