@@ -218,6 +218,13 @@ function throttle<F extends (...args: any[]) => any>(
 
 // A chintzy singleton logger. Get the instance with `ConsoleLogger.get()`
 class ConsoleLogger {
+  // ANSI color codes
+  static time_c = "\u001b[38;5;220m";
+  static info_c = "\u001b[38;5;39m";
+  static error_c = "\u001b[38;5;196m";
+  static debug_c = "\u001b[38;5;20m";
+  static reset_c = "\u001b[0m";
+
   private static instance: ConsoleLogger | null = null;
   private constructor() {}
 
@@ -228,18 +235,24 @@ class ConsoleLogger {
 
   logInfo(...data: any[]) {
     const date_str = new Date().toISOString();
-    console.log(`[${date_str}][INFO]`, ...data);
+    let prefix = `[${ConsoleLogger.time_c}${date_str}${ConsoleLogger.reset_c}]`;
+    prefix += `[${ConsoleLogger.info_c}INFO${ConsoleLogger.reset_c}]`;
+    console.log(prefix, ...data);
   }
 
   logError(...data: any[]) {
     const date_str = new Date().toISOString();
-    console.error(`[${date_str}][ERROR]`, ...data);
+    let prefix = `[${ConsoleLogger.time_c}${date_str}${ConsoleLogger.reset_c}]`;
+    prefix += `[${ConsoleLogger.error_c}ERROR${ConsoleLogger.reset_c}]`;
+    console.error(prefix, ...data);
   }
 
   logDebug(...data: any[]) {
     if (!!Bun.env.VERBOSE || !!Bun.env.DEBUG) {
       const date_str = new Date().toISOString();
-      console.log(`[${date_str}][DEBUG]`, ...data);
+      let prefix = `[${ConsoleLogger.time_c}${date_str}${ConsoleLogger.reset_c}]`;
+      prefix += `[${ConsoleLogger.debug_c}DEBUG${ConsoleLogger.reset_c}]`;
+      console.log(prefix, ...data);
     }
   }
 }
@@ -345,7 +358,7 @@ const indexHtml = (port: string | number) => `\
 
       html,
       body {
-        min-block-size: 100%;
+        block-size: 100%;
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
           Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue",
           sans-serif;
@@ -356,31 +369,61 @@ const indexHtml = (port: string | number) => `\
         place-content: center;
         align-items: center;
         margin: 0;
+        padding: 1rem;
+      }
+
+      .button-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 2rem;
       }
 
       .button {
-        padding: 10px 20px;
-        font-size: 16px;
-        border-radius: 5px;
+        padding: 2rem 3rem;
+        background-color: transparent;
+        font-size: 4rem;
+        border-radius: 1.5rem;
+        border: 0.5rem solid black;
         cursor: pointer;
+        font-weight: bold;
       }
 
-      .on {
-        background-color: #4caf50;
-        color: white;
+      body.on {
+        --stripe-size: 125px;
+        background-image: repeating-linear-gradient(
+          -30deg,
+          transparent,
+          transparent 100px,
+          #fecaca 100px,
+          #fecaca 250px
+        );
       }
 
-      .off {
-        background-color: #f44336;
-        color: white;
+      button.on {
+        background-color: #e11d48;
+        color: #fecdd3;
+        box-shadow: 0 0 24px 8px #e11d48, 0 0 12px 4px #e11d48;
+        border-color: #fecdd3;
+      }
+
+      button.off {
+        background-color: #1d4ed8;
+        color: #bfdbfe;
+        box-shadow: 0 0 24px 8px #60a5fa, 0 0 12px 4px #60a5fa;
+        border-color: #bfdbfe;
       }
     </style>
   </head>
   <body>
-    <button id="onButton" class="button">On</button>
-    <button id="offButton" class="button">Off</button>
+    <div class="button-container">
+      <button id="onButton" class="button">On</button>
+      <button id="offButton" class="button">Off</button>
+    </div>
 
     <script>
+      const body = document.querySelector("body");
       const onButton = document.getElementById("onButton");
       const offButton = document.getElementById("offButton");
 
@@ -398,9 +441,11 @@ const indexHtml = (port: string | number) => `\
         if (event.type.includes("on")) {
           onButton.classList.add("on");
           offButton.classList.remove("off");
+          body.classList.add("on");
         } else if (event.type.includes("off")) {
           offButton.classList.add("off");
           onButton.classList.remove("on");
+          body.classList.remove("on");
         }
       }
 
