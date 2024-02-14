@@ -300,28 +300,26 @@ if (import.meta.main) {
     },
     websocket: {
       open(ws) {
-        // super jank, but the frontend only checks for `event.type`
-        // that contain the strings "on" or "off", so we can just
-        // send the event type as the string "on" or "off" and the
-        // frontend will update the UI accordingly.
+        // let the frontend know what state we think we're in
         if (tailer.state.camera || tailer.state.mic) {
-          ws.send(JSON.stringify({ type: "on" }));
-        } else if (!tailer.state.camera && !tailer.state.mic) {
-          ws.send(JSON.stringify({ type: "off" }));
+          ws.send(JSON.stringify({ type: "on_air" }));
+        } else {
+          ws.send(JSON.stringify({ type: "off_air" }));
         }
         // TODO: how to unsubscribe??
         pubsub.subscribe((event) => ws.send(JSON.stringify(event)));
       },
       message(ws, message) {
-        // IMPORTANT: this is going to cause the same event to be sent _back_
-        //            to the frontend. This is OK because the frontend will
-        //            simply try to update the UI, which should be consistent
-        //            with this event anyway.
+        // IMPORTANT: calling pubsub.publish here is going to cause this same
+        //            event to be sent _back_ to the frontend (bc of the
+        //            pubsub.subscribe call above). This is OK because the
+        //            frontend will simply update the UI in response.
         //
-        //            In fact, this is probably desireable because the frontend
-        //            only updates the UI in response to these events, moreover,
-        //            if multiple tabs are open, they will all be in sync
-        //            becuase they will all receive the same events via the
+        //            In particular, this is desireable because the frontend
+        //            only updates the UI in response to these events, so, this
+        //            conveniently keeps the UI in sync, moreover,
+        //            if multiple tabs are open, they will all also be in sync
+        //            becuase they will all get sent events via the
         //            PubSub subscription setup in the `open` handler.
         const event = JSON.parse(String(message));
         pubsub.publish(event);
