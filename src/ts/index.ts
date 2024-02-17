@@ -221,6 +221,7 @@ class ConsoleLogger {
   // ANSI color codes
   static time_c = "\u001b[38;5;220m";
   static info_c = "\u001b[38;5;39m";
+  static warning_c = "\u001b[38;5;208m";
   static error_c = "\u001b[38;5;196m";
   static debug_c = "\u001b[38;5;20m";
   static reset_c = "\u001b[0m";
@@ -238,6 +239,13 @@ class ConsoleLogger {
     let prefix = `[${ConsoleLogger.time_c}${date_str}${ConsoleLogger.reset_c}]`;
     prefix += `[${ConsoleLogger.info_c}INFO${ConsoleLogger.reset_c}]`;
     console.log(prefix, ...data);
+  }
+
+  logWarning(...data: any[]) {
+    const date_str = new Date().toISOString();
+    let prefix = `[${ConsoleLogger.time_c}${date_str}${ConsoleLogger.reset_c}]`;
+    prefix += `[${ConsoleLogger.warning_c}WARNING${ConsoleLogger.reset_c}]`;
+    console.warn(prefix, ...data);
   }
 
   logError(...data: any[]) {
