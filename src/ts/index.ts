@@ -1,5 +1,9 @@
 import type { Subprocess } from "bun";
 
+/**
+ * These are app-specific representations of hardware events parsed
+ * from the system logs.
+ */
 type LogEvent = {
   type: "camera_on" | "camera_off" | "mic_on" | "mic_off";
   camera: boolean;
@@ -12,6 +16,39 @@ class LogTailer {
   #subscribers: Array<LogSubscriber> = [];
   #process: Subprocess<"ignore", "pipe", "inherit"> | null = null;
   #state: LogState = { camera: false, mic: false };
+
+  constructor(private config: LogTailerConfig) {}
+
+  static fromEnv() {
+    const logger = ConsoleLogger.get();
+    const _osVersion = Bun.env.OS_VERSION;
+
+    // use the default config
+    if (_osVersion == null) {
+      // TODO: detect this??
+      logger.logInfo(
+        `No OS version specified, defaulting to "${OS_VERSIONS.SONOMA}". ` +
+          `To use something other than the default set the OS_VERSION environment ` +
+          `variable to one of: ${Object.values(OS_VERSIONS).join(", ")}`
+      );
+      return new LogTailer(TAILER_CONFIGS[OS_VERSIONS.SONOMA]);
+    }
+
+    // use the user-specified config
+    const osVersion = Object.keys(TAILER_CONFIGS).find(
+      (v) => v === _osVersion
+    ) as keyof typeof TAILER_CONFIGS | undefined;
+    if (osVersion == null) {
+      logger.logWarning(
+        `Unknown OS version: "${_osVersion}" defaulting to ` +
+          `"${OS_VERSIONS.SONOMA}". Valid options: ` +
+          `${Object.values(OS_VERSIONS).join(", ")}`
+      );
+      return new LogTailer(TAILER_CONFIGS[OS_VERSIONS.SONOMA]);
+    }
+
+    return new LogTailer(TAILER_CONFIGS[osVersion]);
+  }
 
   subscribe(subscriber: LogSubscriber) {
     this.#subscribers.push(subscriber);
@@ -32,19 +69,7 @@ class LogTailer {
     const logger = ConsoleLogger.get();
     logger.logInfo("Starting log tailer");
 
-    // TODO: make this work for different mac versions
-    // TODO: make this configurable
-    this.#process = Bun.spawn([
-      "log",
-      "stream",
-      "--predicate",
-      [
-        // camera
-        '(process == "appleh13camerad" and (composedMessage contains "ConnectClient" or composedMessage contains "DisconnectClient"))',
-        // mic
-        '(process == "coreaudiod" and subsystem == "com.apple.coreaudio")',
-      ].join(" or "),
-    ]);
+    this.#process = Bun.spawn(this.config.spawnCmd());
 
     try {
       // @ts-expect-error
@@ -56,24 +81,24 @@ class LogTailer {
         // don't log the log filtering message
         if (line.includes("Filtering the log data using")) continue;
 
-        if (line.includes("ConnectClient")) {
+        if (this.config.isCameraOn(line)) {
           const event = { type: "camera_on", ...this.#state } as const;
           this.#subscribers.forEach((sub) => sub(event));
           this.#state.camera = true;
-        } else if (line.includes("DisconnectClient")) {
+        } else if (this.config.isCameraOff(line)) {
           const event = { type: "camera_off", ...this.#state } as const;
           this.#subscribers.forEach((sub) => sub(event));
           this.#state.camera = false;
-        } else if ((line.match(/input_\w+/g)?.length ?? 0) > 5) {
+        } else if (this.config.isMicOn(line)) {
           const event = { type: "mic_on", ...this.#state } as const;
           this.#subscribers.forEach((sub) => sub(event));
           this.#state.mic = true;
-        } else if (line.includes("Stopping {")) {
+        } else if (this.config.isMicOff(line)) {
           const event = { type: "mic_off", ...this.#state } as const;
           this.#subscribers.forEach((sub) => sub(event));
           this.#state.mic = false;
         } else {
-          logger.logInfo("Unknown log line:", line);
+          logger.logDebug("Unknown log line:", line);
         }
       }
     } catch (err) {
@@ -81,6 +106,50 @@ class LogTailer {
     }
   }
 }
+
+/**
+ * For a specific OS version, this object contains the configuration for the
+ * log tailer. This includes the command to spawn the log stream, and the
+ * functions to determine if a line in the log is a camera on/off or mic on/off
+ * event.
+ */
+type LogTailerConfig = {
+  spawnCmd: () => string[];
+  isCameraOn: (line: string) => boolean;
+  isCameraOff: (line: string) => boolean;
+  isMicOn: (line: string) => boolean;
+  isMicOff: (line: string) => boolean;
+};
+
+const OS_VERSIONS = {
+  SONOMA: "sonoma",
+} as const;
+
+/**
+ * Log tailer configurations for different OS versions
+ */
+const TAILER_CONFIGS = {
+  //
+  // add more OS versions here
+  // ...
+  [OS_VERSIONS.SONOMA]: {
+    spawnCmd: () => [
+      "log",
+      "stream",
+      "--predicate",
+      [
+        // camera
+        '(process == "appleh13camerad" and (composedMessage contains "ConnectClient" or composedMessage contains "DisconnectClient"))',
+        // mic
+        '(process == "coreaudiod" and subsystem == "com.apple.coreaudio")',
+      ].join(" or "),
+    ],
+    isCameraOn: (line: string) => line.includes("ConnectClient"),
+    isCameraOff: (line: string) => line.includes("DisconnectClient"),
+    isMicOn: (line: string) => (line.match(/input_\w+/g)?.length ?? 0) > 5,
+    isMicOff: (line: string) => line.includes("Stopping {"),
+  },
+} satisfies Record<string, LogTailerConfig>;
 
 interface ILightController {
   on(): Promise<void>;
@@ -294,7 +363,7 @@ if (import.meta.main) {
   pubsub.subscribe(throttle(offAirSubscriber, 500));
 
   // create a log tailer and forward events to pubsub
-  const tailer = new LogTailer();
+  const tailer = LogTailer.fromEnv();
   tailer.subscribe((event) => pubsub.publish(event));
   tailer.start();
 
