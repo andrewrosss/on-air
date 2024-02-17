@@ -15,7 +15,12 @@ type LogSubscriber = (event: LogEvent) => void | Promise<void>;
 class LogTailer {
   #subscribers: Array<LogSubscriber> = [];
   #process: Subprocess<"ignore", "pipe", "inherit"> | null = null;
-  #state: LogState = { camera: false, mic: false };
+  #state: LogState = {
+    // Whether the camera is currently on
+    camera: false,
+    // Whether the mic is currently on
+    mic: false,
+  };
 
   constructor(private config: LogTailerConfig) {}
 
@@ -82,18 +87,36 @@ class LogTailer {
         if (line.includes("Filtering the log data using")) continue;
 
         if (this.config.isCameraOn(line)) {
+          // TODO: Is this the right place to ignore the events? (the next line)
+          //
+          //       It sort of feels like hardwareSubscriberFactory should
+          //       be responsible for this, but since the handler that it
+          //       returns is debounced, it's theoretically possible that
+          //       we could miss an event if we ignore it there.
+          //
+          //       ex: a pair of events come in quickly and we ignore the
+          //       first one which contains the "state change"
+          //       (i.e. type: "camera_on" and camera: false)
+          //       but then the next one has "no change"
+          //       (i.e. type: "camera_on" and camera: true)
+          //       and so we don't turn the light on because we ignored
+          //       the first event
+          if (this.#state.camera) continue; // ignore if already on
           const event = { type: "camera_on", ...this.#state } as const;
           this.#subscribers.forEach((sub) => sub(event));
           this.#state.camera = true;
         } else if (this.config.isCameraOff(line)) {
+          if (!this.#state.camera) continue; // ignore if already off
           const event = { type: "camera_off", ...this.#state } as const;
           this.#subscribers.forEach((sub) => sub(event));
           this.#state.camera = false;
         } else if (this.config.isMicOn(line)) {
+          if (this.#state.mic) continue; // ignore if already on
           const event = { type: "mic_on", ...this.#state } as const;
           this.#subscribers.forEach((sub) => sub(event));
           this.#state.mic = true;
         } else if (this.config.isMicOff(line)) {
+          if (!this.#state.mic) continue; // ignore if already off
           const event = { type: "mic_off", ...this.#state } as const;
           this.#subscribers.forEach((sub) => sub(event));
           this.#state.mic = false;
@@ -217,7 +240,7 @@ function hardwareSubscriberFactory(light: ILightController): PubSubSubscriber {
       case "mic_on":
       case "mic_off": {
         const { type: _type, ...state } = event;
-        logger.logInfo(`EventType: ${_type}, State: ${JSON.stringify(state)}`);
+        logger.logInfo(`Event: ${JSON.stringify(event)}`);
         if (_type === "camera_on") await light.on();
         else if (_type === "mic_on") await light.on();
         // only send off-air if both camera and mic are off
